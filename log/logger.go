@@ -3,6 +3,7 @@ package log
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"reflect"
@@ -11,25 +12,94 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Logger provides convenient interface for logging messages.
-type Logger struct {
-	logChan chan<- model.LogEntry
-	svcName string
+// LoggerI handles log-production.
+type LoggerI interface {
+	D(entry Entry, data ...interface{})
+	E(entry Entry)
+	I(entry Entry)
 }
 
-// Log enhances the provided LogEntry, filters it based on LogLevelEnvVar,
+// Entry is a single log-entry.
+type Entry struct {
+	Description   string `json:"description,omitempty"`
+	ErrorCode     int    `json:"errorCode,omitempty"`
+	EventAction   string `json:"eventAction,omitempty"`
+	ServiceAction string `json:"serviceAction,omitempty"`
+	ServiceName   string `json:"serviceName,omitempty"`
+}
+
+// Logger provides convenient interface for logging messages.
+// It enhances the provided LogEntry, filters it based on LogLevelEnvVar,
 // and produces the log using Kafka-Producer.
-// LogLevelEnvVar is an environment variable and can contain possible values from DEBUG, ERROR, INFO, NONE.
+// LogLevelEnvVar is an environment variable and can contain possible values
+// from DEBUG, ERROR, INFO, NONE. This variable can be set dynamically.
 // If the environment variable is unset or is not one of above, INFO level is used.
-// Following are preferences for each log-level:
-//  * DEBUG: Produces INFO and ERROR, and also produces provided data.
-//    If the provides data is one of EventStore-Models, its included data parts such as
-//    "Data" in Event, and "Result" and "Input" in KafkaResponse, are also converted
-//    to string before being produced.
-//  * ERROR: Produces only ERROR log-levels.
-//  * INFO: Produces INFO and ERROR log-levels.
-//  * NONE: Doesn't produce any log-level.
-func (l *Logger) Log(entry model.LogEntry, data ...interface{}) {
+type Logger struct {
+	logChan      chan<- model.LogEntry
+	enableOutput bool
+	output       io.Writer
+	svcName      string
+}
+
+// DisableStdOut disables printing to stdout.
+// The logs are still sent to logsink.
+func (l *Logger) DisableStdOut() {
+	l.enableOutput = false
+}
+
+// EnableStdOut enables printing to stdout. This is the default.
+func (l *Logger) EnableStdOut() {
+	l.enableOutput = true
+}
+
+// SetOutput sets the output to which the logs are written.
+// Default is Stdout.
+func (l *Logger) SetOutput(w io.Writer) {
+	l.output = w
+}
+
+// D produces DEBUG logs, which will also produce INFO and ERROR.
+// Additional data provided will be marshalled and added to log-description.
+// If the data is one of EventStore-Models, the included data-elements, such as
+// "Data" in Event, "Result" and "Input" in KafkaResponse, are also converted
+// to plain-strings before log is produced.
+func (l *Logger) D(entry Entry, data ...interface{}) {
+	l.log(model.LogEntry{
+		Description:   entry.Description,
+		ErrorCode:     entry.ErrorCode,
+		Level:         "DEBUG",
+		EventAction:   entry.EventAction,
+		ServiceAction: entry.ServiceAction,
+		ServiceName:   entry.ServiceName,
+	}, data...)
+}
+
+// E produces ERROR logs which will discard INFO and DEBUG logs,
+// and produce only ERROR logs.
+func (l *Logger) E(entry Entry) {
+	l.log(model.LogEntry{
+		Description:   entry.Description,
+		ErrorCode:     entry.ErrorCode,
+		Level:         "ERROR",
+		EventAction:   entry.EventAction,
+		ServiceAction: entry.ServiceAction,
+		ServiceName:   entry.ServiceName,
+	})
+}
+
+// I produces INFO logs, which also include ERROR logs.
+// DEBUG logs are discarded from production.
+func (l *Logger) I(entry Entry) {
+	l.log(model.LogEntry{
+		Description:   entry.Description,
+		ErrorCode:     entry.ErrorCode,
+		Level:         "INFO",
+		EventAction:   entry.EventAction,
+		ServiceAction: entry.ServiceAction,
+		ServiceName:   entry.ServiceName,
+	})
+}
+func (l *Logger) log(entry model.LogEntry, data ...interface{}) {
 	level := os.Getenv(LogLevelEnvVar)
 	if level != "INFO" && level != "ERROR" && level != "DEBUG" && level != "NONE" {
 		log.Println(
@@ -40,15 +110,22 @@ func (l *Logger) Log(entry model.LogEntry, data ...interface{}) {
 		level = "INFO"
 	}
 
-	if level == "NONE" {
+	switch level {
+	case "NONE":
 		return
+	case "INFO":
+		if entry.Level == "DEBUG" {
+			return
+		}
+	case "ERROR":
+		if entry.Level != "ERROR" {
+			return
+		}
 	}
-	// Only INFO and ERROR logs
-	if level == "INFO" && entry.Level == "DEBUG" {
-		return
-	}
-	// Only ERROR logs
-	if level == "ERROR" && entry.Level != "ERROR" {
+	if entry.Level == "NONE" {
+		log.Println(
+			`LogENtry contains "NONE" Log-Level which is invalid. LogEntry will be ignored.`,
+		)
 		return
 	}
 
@@ -57,7 +134,7 @@ func (l *Logger) Log(entry model.LogEntry, data ...interface{}) {
 	}
 
 	if level == "DEBUG" {
-		desc, err := l.fmtDebug(entry.Description, data...)
+		desc, err := fmtDebug(entry.Description, data...)
 		if err != nil {
 			err = errors.Wrap(err, "Error while formatting log for Debug-level")
 			log.Println(err)
@@ -67,10 +144,15 @@ func (l *Logger) Log(entry model.LogEntry, data ...interface{}) {
 		}
 	}
 
+	if l.enableOutput {
+		l.output.Write([]byte(entry.Description))
+	}
+
 	l.logChan <- entry
 }
 
-func (*Logger) fmtDebug(description string, data ...interface{}) (string, error) {
+// fmtDebug adds the provided additional data to log-description if the level is DEBUG.
+func fmtDebug(description string, data ...interface{}) (string, error) {
 	if data == nil {
 		return description, nil
 	}
@@ -84,79 +166,110 @@ func (*Logger) fmtDebug(description string, data ...interface{}) (string, error)
 		}
 
 		outStr += fmt.Sprintf("==> Data %d: ", i)
-		switch t := d.(type) {
-		case model.Event:
-			tm := map[string]interface{}{
-				"aggregateID":   t.AggregateID,
-				"eventAction":   t.EventAction,
-				"serviceAction": t.ServiceAction,
-				"correlationID": t.CorrelationID,
-				"data":          string(t.Data),
-				"nanoTime":      t.NanoTime,
-				"userUUID":      t.UserUUID.String(),
-				"uuid":          t.UUID.String(),
-				"version":       t.Version,
-				"yearBucket":    t.YearBucket,
-			}
-			mm, err := json.Marshal(tm)
-			if err != nil {
-				err = errors.Wrap(err, "Error marshalling Event")
-				return "", err
-			}
-			outStr += "Event: \n" + string(mm)
-
-		case model.KafkaResponse:
-			tm := map[string]interface{}{
-				"aggregateID":   t.AggregateID,
-				"error":         t.Error,
-				"errorCode":     t.ErrorCode,
-				"topic":         t.Topic,
-				"eventAction":   t.EventAction,
-				"serviceAction": t.ServiceAction,
-				"correlationID": t.CorrelationID,
-				"result":        string(t.Result),
-				"input":         string(t.Input),
-				"uuid":          t.UUID.String(),
-			}
-			mm, err := json.Marshal(tm)
-			if err != nil {
-				err = errors.Wrap(err, "Error marshalling KafkaResponse")
-				return "", err
-			}
-			outStr += "KafkaResponse: \n" + string(mm)
-
-		case model.EventMeta:
-			mm, err := json.Marshal(t)
-			if err != nil {
-				err = errors.Wrap(err, "Error marshalling EventMeta")
-				return "", err
-			}
-			outStr += "EventMeta: \n" + string(mm)
-
-		case model.EventStoreQuery:
-			mm, err := json.Marshal(t)
-			if err != nil {
-				err = errors.Wrap(err, "Error marshalling EventStoreQuery")
-				return "", err
-			}
-			outStr += "EventStoreQuery: \n" + string(mm)
-
-		default:
-			dataKind := reflect.ValueOf(d).Kind()
-			if dataKind == reflect.Struct || dataKind == reflect.Map {
-				mm, err := json.Marshal(t)
-				if err != nil {
-					err = errors.Wrap(err, "Error marshalling Unknown Type")
-					return "", err
-				}
-				outStr += fmt.Sprintf("Unknown: %s:\n%s", dataKind.String(), string(mm))
-			} else {
-				outStr += fmt.Sprintf("%v", d)
-			}
+		dd, err := fmtDebugData(d)
+		if err != nil {
+			err = errors.Wrapf(err, "Error while formatting DEBUG data at index: %d", i)
+			return "", err
 		}
-		outStr += "\n"
+		outStr += dd + "\n"
 	}
 
 	outStr += "------------------------\n"
 	return outStr, nil
+}
+
+func fmtDebugData(d interface{}) (string, error) {
+	if reflect.TypeOf(d).Kind() == reflect.Ptr {
+		d = reflect.ValueOf(d).Elem().Interface()
+	}
+
+	switch t := d.(type) {
+	case model.Event:
+		tm := map[string]interface{}{
+			"aggregateID":   t.AggregateID,
+			"eventAction":   t.EventAction,
+			"serviceAction": t.ServiceAction,
+			"correlationID": t.CorrelationID,
+			"data":          string(t.Data),
+			"nanoTime":      t.NanoTime,
+			"userUUID":      t.UserUUID.String(),
+			"uuid":          t.UUID.String(),
+			"version":       t.Version,
+			"yearBucket":    t.YearBucket,
+		}
+		mm, err := json.Marshal(tm)
+		if err != nil {
+			err = errors.Wrap(err, "Error marshalling Event")
+			return "", err
+		}
+		return fmt.Sprintf("%s:\n%s", reflect.TypeOf(t).String(), string(mm)), nil
+
+	case model.KafkaResponse:
+		tm := map[string]interface{}{
+			"aggregateID":   t.AggregateID,
+			"error":         t.Error,
+			"errorCode":     t.ErrorCode,
+			"topic":         t.Topic,
+			"eventAction":   t.EventAction,
+			"serviceAction": t.ServiceAction,
+			"correlationID": t.CorrelationID,
+			"result":        string(t.Result),
+			"input":         string(t.Input),
+			"uuid":          t.UUID.String(),
+		}
+		mm, err := json.Marshal(tm)
+		if err != nil {
+			err = errors.Wrap(err, "Error marshalling KafkaResponse")
+			return "", err
+		}
+		return fmt.Sprintf("%s:\n%s", reflect.TypeOf(t).String(), string(mm)), nil
+
+	case model.EventMeta:
+		mm, err := json.Marshal(t)
+		if err != nil {
+			err = errors.Wrap(err, "Error marshalling EventMeta")
+			return "", err
+		}
+		return "EventMeta:\n" + string(mm), nil
+
+	case model.EventStoreQuery:
+		mm, err := json.Marshal(t)
+		if err != nil {
+			err = errors.Wrap(err, "Error marshalling EventStoreQuery")
+			return "", err
+		}
+		return fmt.Sprintf("%s:\n%s", reflect.TypeOf(t).String(), string(mm)), nil
+
+	default:
+		dataKind := reflect.ValueOf(d).Kind()
+		switch dataKind {
+		case reflect.Struct, reflect.Map:
+			mm, err := json.Marshal(t)
+			if err != nil {
+				err = errors.Wrap(err, "Error marshalling Unknown Type")
+				return "", err
+			}
+			return fmt.Sprintf("%s:\n%s", reflect.TypeOf(t).String(), string(mm)), nil
+
+		case reflect.Slice, reflect.Array:
+			dataType := reflect.TypeOf(t).String()
+			outStr := fmt.Sprintf("%s:\n", dataType)
+
+			v := reflect.ValueOf(t)
+			for i := 0; i < v.Len(); i++ {
+				outStr += fmt.Sprintf("=> Index %d: ", i)
+
+				dd, err := fmtDebugData(v.Index(i).Interface())
+				if err != nil {
+					err = errors.Wrapf(err, `Error formatting %s at index: "%d"`, dataType, i)
+					return "", err
+				}
+				outStr += dd + "\n"
+			}
+			return outStr, nil
+
+		default:
+			return fmt.Sprintf("%v", d), nil
+		}
+	}
 }

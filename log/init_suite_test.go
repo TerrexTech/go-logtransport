@@ -88,7 +88,7 @@ var _ = Describe("LogSink", func() {
 
 	Describe("test log-production", func() {
 		var (
-			logger *Logger
+			logger LoggerI
 
 			consumer *kafka.Consumer
 			topic    string
@@ -128,21 +128,20 @@ var _ = Describe("LogSink", func() {
 				}
 			}()
 
-			testLog := model.LogEntry{
+			testLog := Entry{
 				Description:   "test-log",
 				ErrorCode:     0,
-				Level:         "INFO",
 				EventAction:   "test-eventaction",
 				ServiceAction: "test-svcaction",
 				ServiceName:   "testsvc",
 			}
-			logger.Log(testLog)
+			logger.I(testLog)
 
 			msgCallback := func(msg *sarama.ConsumerMessage) bool {
 				defer GinkgoRecover()
 				log.Println("A Response was received on response channel")
 
-				l := &model.LogEntry{}
+				l := &Entry{}
 				err := json.Unmarshal(msg.Value, l)
 				Expect(err).ToNot(HaveOccurred())
 
@@ -168,21 +167,20 @@ var _ = Describe("LogSink", func() {
 				}
 			}()
 
-			testLog := model.LogEntry{
+			testLog := Entry{
 				Description:   "test-log",
 				ErrorCode:     0,
-				Level:         "INFO",
 				EventAction:   "test-eventaction",
 				ServiceAction: "test-svcaction",
 			}
-			logger.Log(testLog)
+			logger.I(testLog)
 			testLog.ServiceName = "testsvc"
 
 			msgCallback := func(msg *sarama.ConsumerMessage) bool {
 				defer GinkgoRecover()
 				log.Println("A Response was received on response channel")
 
-				l := &model.LogEntry{}
+				l := &Entry{}
 				err := json.Unmarshal(msg.Value, l)
 				Expect(err).ToNot(HaveOccurred())
 
@@ -200,6 +198,133 @@ var _ = Describe("LogSink", func() {
 			consumer.Consume(ctx, handler)
 		})
 
+		It("should not publish DEBUG logs if INFO level is specified", func() {
+			go func() {
+				for err := range consumer.Errors() {
+					Expect(err).To(HaveOccurred())
+				}
+			}()
+
+			err := os.Setenv(LogLevelEnvVar, "INFO")
+			Expect(err).ToNot(HaveOccurred())
+
+			uuid1, err := uuuid.NewV4()
+			Expect(err).ToNot(HaveOccurred())
+			logger.I(Entry{
+				Description:   uuid1.String(),
+				ErrorCode:     0,
+				EventAction:   uuid1.String(),
+				ServiceAction: "test-svcaction",
+				ServiceName:   "some-name",
+			})
+
+			uuid2, err := uuuid.NewV4()
+			Expect(err).ToNot(HaveOccurred())
+			logger.E(Entry{
+				Description:   uuid2.String(),
+				ErrorCode:     0,
+				EventAction:   uuid2.String(),
+				ServiceAction: "test-svcaction",
+				ServiceName:   "some-name",
+			})
+
+			uuid3, err := uuuid.NewV4()
+			Expect(err).ToNot(HaveOccurred())
+			logger.D(Entry{
+				Description:   uuid3.String(),
+				ErrorCode:     0,
+				EventAction:   uuid3.String(),
+				ServiceAction: "test-svcaction",
+				ServiceName:   "some-name",
+			})
+
+			dSuccess := true
+			eSuccess := false
+			iSuccess := false
+			msgCallback := func(msg *sarama.ConsumerMessage) bool {
+				defer GinkgoRecover()
+
+				l := &Entry{}
+				err := json.Unmarshal(msg.Value, l)
+				Expect(err).ToNot(HaveOccurred())
+
+				switch l.Description {
+				case uuid3.String():
+					dSuccess = false
+				case uuid2.String():
+					eSuccess = true
+				case uuid1.String():
+					iSuccess = true
+				}
+				if !dSuccess {
+					return true
+				}
+				return false
+			}
+
+			handler := &msgHandler{msgCallback}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			consumer.Consume(ctx, handler)
+
+			Expect(dSuccess).To(BeTrue())
+			Expect(eSuccess).To(BeTrue())
+			Expect(iSuccess).To(BeTrue())
+		})
+
+		It("should not publish DEBUG and INFO logs if ERROR level is specified", func() {
+			go func() {
+				for err := range consumer.Errors() {
+					Expect(err).To(HaveOccurred())
+				}
+			}()
+
+			err := os.Setenv(LogLevelEnvVar, "ERROR")
+			Expect(err).ToNot(HaveOccurred())
+
+			uuid1, err := uuuid.NewV4()
+			Expect(err).ToNot(HaveOccurred())
+			logger.I(Entry{
+				Description:   uuid1.String(),
+				ErrorCode:     0,
+				EventAction:   uuid1.String(),
+				ServiceAction: "test-svcaction",
+				ServiceName:   "some-name",
+			})
+
+			uuid2, err := uuuid.NewV4()
+			Expect(err).ToNot(HaveOccurred())
+			logger.D(Entry{
+				Description:   uuid2.String(),
+				ErrorCode:     0,
+				EventAction:   uuid2.String(),
+				ServiceAction: "test-svcaction",
+				ServiceName:   "some-name",
+			})
+
+			isMsgReceived := false
+			msgCallback := func(msg *sarama.ConsumerMessage) bool {
+				defer GinkgoRecover()
+
+				l := &Entry{}
+				err := json.Unmarshal(msg.Value, l)
+				Expect(err).ToNot(HaveOccurred())
+
+				if l.Description == uuid1.String() || l.Description == uuid2.String() {
+					isMsgReceived = true
+					return true
+				}
+				return false
+			}
+
+			handler := &msgHandler{msgCallback}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			consumer.Consume(ctx, handler)
+
+			Expect(isMsgReceived).To(BeFalse())
+		})
+
 		It("should not publish logs if NONE level is specified", func() {
 			go func() {
 				for err := range consumer.Errors() {
@@ -212,21 +337,20 @@ var _ = Describe("LogSink", func() {
 
 			err = os.Setenv(LogLevelEnvVar, "NONE")
 			Expect(err).ToNot(HaveOccurred())
-			testLog := model.LogEntry{
+			testLog := Entry{
 				Description:   uuid.String(),
 				ErrorCode:     0,
-				Level:         "INFO",
 				EventAction:   uuid.String(),
 				ServiceAction: "test-svcaction",
 				ServiceName:   "some-name",
 			}
-			logger.Log(testLog)
+			logger.I(testLog)
 
 			isMsgReceived := false
 			msgCallback := func(msg *sarama.ConsumerMessage) bool {
 				defer GinkgoRecover()
 
-				l := &model.LogEntry{}
+				l := &Entry{}
 				err := json.Unmarshal(msg.Value, l)
 				Expect(err).ToNot(HaveOccurred())
 
@@ -258,10 +382,9 @@ var _ = Describe("LogSink", func() {
 
 			err = os.Setenv(LogLevelEnvVar, "DEBUG")
 			Expect(err).ToNot(HaveOccurred())
-			testLog := model.LogEntry{
+			testLog := Entry{
 				Description:   uuid.String(),
 				ErrorCode:     0,
-				Level:         "INFO",
 				EventAction:   uuid.String(),
 				ServiceAction: "test-svcaction",
 				ServiceName:   "some-name",
@@ -274,17 +397,23 @@ var _ = Describe("LogSink", func() {
 				AggregateID:      1,
 				AggregateVersion: 3,
 			}
-			t3 := model.EventMeta{
-				AggregateID:      1,
-				AggregateVersion: 3,
+			t3 := []model.EventMeta{
+				model.EventMeta{
+					AggregateID:      1,
+					AggregateVersion: 3,
+				},
+				model.EventMeta{
+					AggregateID:      2,
+					AggregateVersion: 8,
+				},
 			}
 			t4 := model.KafkaResponse{
 				AggregateID: 1,
 				EventAction: "testaction",
 			}
-			logger.Log(testLog, t1, t2, t3, t4, "testData5", 4)
+			logger.D(testLog, t1, t2, t3, t4, "testData5", 4)
 
-			desc, err := logger.fmtDebug(testLog.Description, t1, t2, t3, t4, "testData5", 4)
+			desc, err := fmtDebug(testLog.Description, t1, t2, t3, t4, "testData5", 4)
 			Expect(err).ToNot(HaveOccurred())
 			testLog.Description = desc
 
@@ -292,7 +421,7 @@ var _ = Describe("LogSink", func() {
 				defer GinkgoRecover()
 				log.Println("A Response was received on response channel")
 
-				l := model.LogEntry{}
+				l := Entry{}
 				err := json.Unmarshal(msg.Value, &l)
 				Expect(err).ToNot(HaveOccurred())
 
