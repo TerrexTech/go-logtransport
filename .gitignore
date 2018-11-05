@@ -1,0 +1,7 @@
+.history
+.idea
+.vagrant
+.vscode
+vendor*
+.vendor*
+debug*
