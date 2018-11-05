@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"os"
 
 	"github.com/TerrexTech/go-eventstore-models/model"
 	"github.com/TerrexTech/go-kafkautils/kafka"
@@ -21,7 +22,7 @@ func Init(
 	svcName string,
 	config *kafka.ProducerConfig,
 	topic string,
-) (*Logger, error) {
+) (LoggerI, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -88,7 +89,9 @@ func Init(
 	}()
 
 	return &Logger{
-		logChan: (chan<- model.LogEntry)(logChan),
-		svcName: svcName,
+		logChan:      (chan<- model.LogEntry)(logChan),
+		enableOutput: true,
+		output:       os.Stdout,
+		svcName:      svcName,
 	}, nil
 }
