@@ -72,7 +72,7 @@ func (l *Logger) Log(entry model.LogEntry, data ...interface{}) {
 
 func (*Logger) fmtDebug(description string, data ...interface{}) (string, error) {
 	if data == nil {
-		return "", nil
+		return description, nil
 	}
 
 	outStr := "\n------------------------\n"
