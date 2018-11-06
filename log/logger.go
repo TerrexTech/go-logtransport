@@ -10,12 +10,14 @@ import (
 
 	"github.com/TerrexTech/go-eventstore-models/model"
 	"github.com/pkg/errors"
+	"github.com/tidwall/gjson"
 )
 
 // LoggerI handles log-production.
 type LoggerI interface {
 	D(entry Entry, data ...interface{})
 	E(entry Entry)
+	F(entry Entry)
 	I(entry Entry)
 }
 
@@ -85,6 +87,20 @@ func (l *Logger) E(entry Entry) {
 		ServiceAction: entry.ServiceAction,
 		ServiceName:   entry.ServiceName,
 	})
+}
+
+// F produces ERROR logs which will discard INFO and DEBUG logs,
+// and produce only ERROR logs. This also exits the program using os.Exit after logging.
+func (l *Logger) F(entry Entry) {
+	l.log(model.LogEntry{
+		Description:   entry.Description,
+		ErrorCode:     entry.ErrorCode,
+		Level:         "ERROR",
+		EventAction:   entry.EventAction,
+		ServiceAction: entry.ServiceAction,
+		ServiceName:   entry.ServiceName,
+	})
+	os.Exit(1)
 }
 
 // I produces INFO logs, which also include ERROR logs.
@@ -185,12 +201,17 @@ func fmtDebugData(d interface{}) (string, error) {
 
 	switch t := d.(type) {
 	case model.Event:
+		eventData := string(t.Data)
+		parsedData, ok := gjson.Parse(eventData).Value().(interface{})
+		if !ok {
+			parsedData = eventData
+		}
 		tm := map[string]interface{}{
 			"aggregateID":   t.AggregateID,
 			"eventAction":   t.EventAction,
 			"serviceAction": t.ServiceAction,
 			"correlationID": t.CorrelationID,
-			"data":          string(t.Data),
+			"data":          parsedData,
 			"nanoTime":      t.NanoTime,
 			"userUUID":      t.UserUUID.String(),
 			"uuid":          t.UUID.String(),
@@ -205,6 +226,16 @@ func fmtDebugData(d interface{}) (string, error) {
 		return fmt.Sprintf("%s:\n%s", reflect.TypeOf(t).String(), string(mm)), nil
 
 	case model.KafkaResponse:
+		krResult := string(t.Result)
+		result, ok := gjson.Parse(krResult).Value().(interface{})
+		if !ok {
+			result = krResult
+		}
+		krInput := string(t.Input)
+		input, ok := gjson.Parse(krInput).Value().(interface{})
+		if !ok {
+			input = krInput
+		}
 		tm := map[string]interface{}{
 			"aggregateID":   t.AggregateID,
 			"error":         t.Error,
@@ -213,8 +244,8 @@ func fmtDebugData(d interface{}) (string, error) {
 			"eventAction":   t.EventAction,
 			"serviceAction": t.ServiceAction,
 			"correlationID": t.CorrelationID,
-			"result":        string(t.Result),
-			"input":         string(t.Input),
+			"result":        result,
+			"input":         input,
 			"uuid":          t.UUID.String(),
 		}
 		mm, err := json.Marshal(tm)
