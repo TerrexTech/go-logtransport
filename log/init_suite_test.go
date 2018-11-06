@@ -88,7 +88,7 @@ var _ = Describe("LogSink", func() {
 
 	Describe("test log-production", func() {
 		var (
-			logger LoggerI
+			logger Logger
 
 			consumer *kafka.Consumer
 			topic    string
