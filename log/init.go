@@ -14,7 +14,7 @@ import (
 // LogLevelEnvVar is the environment-variable from which the log-level is read.
 const LogLevelEnvVar = "LOG_LEVEL"
 
-// Init creates a new KafkaProducer for producing log-messages.
+// Init creates a new Logger for handling log-messages.
 func Init(
 	ctx context.Context,
 	// svcName is the default ServiceName to be used
@@ -22,7 +22,7 @@ func Init(
 	svcName string,
 	config *kafka.ProducerConfig,
 	topic string,
-) (LoggerI, error) {
+) (Logger, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -88,7 +88,7 @@ func Init(
 		}
 	}()
 
-	return &Logger{
+	return &logger{
 		logChan:      (chan<- model.LogEntry)(logChan),
 		enableOutput: true,
 		output:       os.Stdout,

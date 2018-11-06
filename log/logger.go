@@ -13,12 +13,31 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// LoggerI handles log-production.
-type LoggerI interface {
+// Logger provides convenient handling for log-messages.
+type Logger interface {
+	// D produces DEBUG logs, which will also produce INFO and ERROR.
+	// Additional data provided will be marshalled and added to log-description.
+	// If the data is one of EventStore-Models, the included data-elements, such as
+	// "Data" in Event, "Result" and "Input" in KafkaResponse, are also converted
+	// to plain-strings before log is produced.
 	D(entry Entry, data ...interface{})
+	// E produces ERROR logs which will discard INFO and DEBUG logs,
+	// and produce only ERROR logs.
 	E(entry Entry)
+	// F produces ERROR logs which will discard INFO and DEBUG logs,
+	// and produce only ERROR logs. This also exits the program using os.Exit after logging.
 	F(entry Entry)
+	// I produces INFO logs, which also include ERROR logs.
+	// DEBUG logs are discarded from production.
 	I(entry Entry)
+	// DisableOutput disables writing to Output.
+	// The logs are still sent to logsink. Output is enabled by default.
+	DisableOutput()
+	// EnableOutput enables writing to Output. This is the default.
+	EnableOutput()
+	// SetOutput sets the output to which the logs are written.
+	// Default is Stdout.
+	SetOutput(w io.Writer)
 }
 
 // Entry is a single log-entry.
@@ -30,42 +49,27 @@ type Entry struct {
 	ServiceName   string `json:"serviceName,omitempty"`
 }
 
-// Logger provides convenient interface for logging messages.
-// It enhances the provided LogEntry, filters it based on LogLevelEnvVar,
-// and produces the log using Kafka-Producer.
-// LogLevelEnvVar is an environment variable and can contain possible values
-// from DEBUG, ERROR, INFO, NONE. This variable can be set dynamically.
-// If the environment variable is unset or is not one of above, INFO level is used.
-type Logger struct {
+// logger implements Logger interface
+type logger struct {
 	logChan      chan<- model.LogEntry
 	enableOutput bool
 	output       io.Writer
 	svcName      string
 }
 
-// DisableStdOut disables printing to stdout.
-// The logs are still sent to logsink.
-func (l *Logger) DisableStdOut() {
+func (l *logger) DisableOutput() {
 	l.enableOutput = false
 }
 
-// EnableStdOut enables printing to stdout. This is the default.
-func (l *Logger) EnableStdOut() {
+func (l *logger) EnableOutput() {
 	l.enableOutput = true
 }
 
-// SetOutput sets the output to which the logs are written.
-// Default is Stdout.
-func (l *Logger) SetOutput(w io.Writer) {
+func (l *logger) SetOutput(w io.Writer) {
 	l.output = w
 }
 
-// D produces DEBUG logs, which will also produce INFO and ERROR.
-// Additional data provided will be marshalled and added to log-description.
-// If the data is one of EventStore-Models, the included data-elements, such as
-// "Data" in Event, "Result" and "Input" in KafkaResponse, are also converted
-// to plain-strings before log is produced.
-func (l *Logger) D(entry Entry, data ...interface{}) {
+func (l *logger) D(entry Entry, data ...interface{}) {
 	l.log(model.LogEntry{
 		Description:   entry.Description,
 		ErrorCode:     entry.ErrorCode,
@@ -76,9 +80,7 @@ func (l *Logger) D(entry Entry, data ...interface{}) {
 	}, data...)
 }
 
-// E produces ERROR logs which will discard INFO and DEBUG logs,
-// and produce only ERROR logs.
-func (l *Logger) E(entry Entry) {
+func (l *logger) E(entry Entry) {
 	l.log(model.LogEntry{
 		Description:   entry.Description,
 		ErrorCode:     entry.ErrorCode,
@@ -89,9 +91,7 @@ func (l *Logger) E(entry Entry) {
 	})
 }
 
-// F produces ERROR logs which will discard INFO and DEBUG logs,
-// and produce only ERROR logs. This also exits the program using os.Exit after logging.
-func (l *Logger) F(entry Entry) {
+func (l *logger) F(entry Entry) {
 	l.log(model.LogEntry{
 		Description:   entry.Description,
 		ErrorCode:     entry.ErrorCode,
@@ -103,9 +103,7 @@ func (l *Logger) F(entry Entry) {
 	os.Exit(1)
 }
 
-// I produces INFO logs, which also include ERROR logs.
-// DEBUG logs are discarded from production.
-func (l *Logger) I(entry Entry) {
+func (l *logger) I(entry Entry) {
 	l.log(model.LogEntry{
 		Description:   entry.Description,
 		ErrorCode:     entry.ErrorCode,
@@ -115,7 +113,7 @@ func (l *Logger) I(entry Entry) {
 		ServiceName:   entry.ServiceName,
 	})
 }
-func (l *Logger) log(entry model.LogEntry, data ...interface{}) {
+func (l *logger) log(entry model.LogEntry, data ...interface{}) {
 	level := os.Getenv(LogLevelEnvVar)
 	if level != "INFO" && level != "ERROR" && level != "DEBUG" && level != "NONE" {
 		log.Println(
