@@ -75,7 +75,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:64609c53991a461bd1ebd4d398cc930be8ba5d441d2a02b73f94c40a66ef93db"
+  digest = "1:7173cfc9eec4c3f4b1f9260e60cd2f73a8f9b49739d00647f71a1eb14c498939"
   name = "github.com/gocql/gocql"
   packages = [
     ".",
@@ -84,7 +84,7 @@
     "internal/streams",
   ]
   pruneopts = "UT"
-  revision = "a84ce58083d3d907fb0d94290d088a1fcd9cd858"
+  revision = "9de8c0414fd7ff72ee819f25a66e4942cb223873"
 
 [[projects]]
   digest = "1:c594a691090b434d55c67f6cc8e326ef5ba49452abc059821bd5d4fd4cdef08c"
@@ -208,22 +208,6 @@
   revision = "3113b8401b8a98917cde58f8bbd42a1b1c03b1fd"
 
 [[projects]]
-  digest = "1:2cab41f59638fdb77dda96ab4f9b5860ef30f48967557254eba127e43c756f2e"
-  name = "github.com/tidwall/gjson"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "1e3f6aeaa5bad08d777ea7807b279a07885dd8b2"
-  version = "v1.1.3"
-
-[[projects]]
-  branch = "master"
-  digest = "1:d3f968e2a2c9f8506ed44b01b605ade0176ba6cf73ff679073e77cfdef2c0d55"
-  name = "github.com/tidwall/match"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "1731857f09b1f38450e2c12409748407822dc6be"
-
-[[projects]]
   branch = "master"
   digest = "1:5193d913046443e59093d66a97a40c51f4a5ea4ceba60f3b3ecf89694de5d16f"
   name = "golang.org/x/net"
@@ -233,15 +217,15 @@
     "html/charset",
   ]
   pruneopts = "UT"
-  revision = "c10e9556a7bc0e7c942242b606f0acf024ad5d6a"
+  revision = "03003ca0c849e57b6ea29a4bab8d3cb6e4d568fe"
 
 [[projects]]
   branch = "master"
-  digest = "1:35560529f5721d65f36dc23aa15fbf7306c5091cdc3f29f65881af5031b80cc8"
+  digest = "1:7ba061af4131fb44b30448572acd0d6fefbf63a61b97b7ef1dea0be5871c2742"
   name = "golang.org/x/sys"
   packages = ["unix"]
   pruneopts = "UT"
-  revision = "9b800f95dbbc54abff0acf7ee32d88ba4e328c89"
+  revision = "66b7b1311ac80bbafcd2daeef9a5e6e2cd1e2399"
 
 [[projects]]
   digest = "1:aa4d6967a3237f8367b6bf91503964a77183ecf696f1273e8ad3551bb4412b5f"
@@ -315,7 +299,6 @@
     "github.com/onsi/ginkgo",
     "github.com/onsi/gomega",
     "github.com/pkg/errors",
-    "github.com/tidwall/gjson",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1
