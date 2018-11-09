@@ -1,13 +1,8 @@
 package log
 
 import (
-	"fmt"
 	"io"
-	"log"
 	"os"
-	"reflect"
-	"runtime"
-	"time"
 
 	"github.com/TerrexTech/go-eventstore-models/model"
 	"github.com/pkg/errors"
@@ -36,6 +31,15 @@ type Logger interface {
 	DisableOutput()
 	// EnableOutput enables writing to Output. This is the default.
 	EnableOutput()
+	// SetArrayThreshold sets threshold for array-length. Arrays exceeding this length will
+	// be trimmed. Default value is 15.
+	SetArrayThreshold(threshold int)
+	// SetEventAction sets default EventAction for logging if none is set in Entry.
+	// Default is blank string.
+	SetEventAction(action string)
+	// SetEventAction sets default EventServiceAction for logging if none is set in Entry.
+	// Default is blank string.
+	SetServiceAction(action string)
 	// SetOutput sets the output to which the logs are written.
 	// Default is Stdout.
 	SetOutput(w io.Writer)
@@ -55,10 +59,17 @@ type logger struct {
 	logChan      chan<- model.LogEntry
 	enableOutput bool
 	output       io.Writer
+	arrThreshold int
 
 	svcName       string
 	eventAction   string
 	serviceAction string
+}
+
+func (l *logger) SetArrayThreshold(threshold int) {
+	if threshold > 0 {
+		l.arrThreshold = threshold
+	}
 }
 
 func (l *logger) SetEventAction(action string) {
@@ -125,6 +136,7 @@ func (l *logger) I(entry Entry, data ...interface{}) {
 		ServiceName:   entry.ServiceName,
 	})
 }
+
 func (l *logger) log(entry model.LogEntry, data ...interface{}) {
 	level := os.Getenv(LogLevelEnvVar)
 	invalidConfig := false
@@ -146,9 +158,9 @@ func (l *logger) log(entry model.LogEntry, data ...interface{}) {
 		}
 	}
 	if entry.Level == "NONE" {
-		log.Println(
-			`LogENtry contains "NONE" Log-Level which is invalid. LogEntry will be ignored.`,
-		)
+		l.output.Write([]byte(
+			`LogEntry contains "NONE" Log-Level which is invalid. LogEntry will be ignored.`,
+		))
 		return
 	}
 
@@ -163,67 +175,25 @@ func (l *logger) log(entry model.LogEntry, data ...interface{}) {
 	}
 
 	if level == "DEBUG" {
-		desc, err := fmtDebug(entry.Description, data...)
+		desc, err := fmtDebug(entry.Description, l.arrThreshold, data...)
 		if err != nil {
 			err = errors.Wrap(err, "Error while formatting log for Debug-level")
-			log.Println(err)
-			entry.Description += " " + err.Error()
+			entry.Description += desc + "\n" + err.Error()
 		} else {
 			entry.Description = desc
 		}
 	}
+	entry.Description += "\n"
 
 	if l.enableOutput {
 		if invalidConfig {
 			l.output.Write([]byte(
 				"LogLevelEnvVar environment variable missing or set to invalid value. " +
-					"Valid levels are: ERROR, INFO and DEBUG. " + "INFO level will be used.",
+					"Valid levels are: ERROR, INFO and DEBUG. " + "INFO level will be used.\n",
 			))
 		}
 		l.output.Write([]byte(entry.Description))
 	}
 
 	l.logChan <- entry
-}
-
-// fmtDebug adds the provided additional data to log-description if the level is DEBUG.
-func fmtDebug(description string, data ...interface{}) (string, error) {
-	now := time.Now()
-	year, month, day := now.Date()
-	hour, min, sec := now.Clock()
-	timeFMT := fmt.Sprintf(
-		"%02d/%02d/%02d %02d:%02d:%02d",
-		year, month, day, hour, min, sec,
-	)
-	_, file, line, ok := runtime.Caller(2)
-	if !ok {
-		file = "???"
-		line = -1
-	}
-	description = fmt.Sprintf("%s %s:%d:\n%s", timeFMT, file, line, description)
-
-	if data == nil {
-		return description + "\n", nil
-	}
-
-	outStr := "\n========================\n"
-	outStr += description + "\n"
-
-	for i, d := range data {
-		if reflect.TypeOf(d).Kind() == reflect.Ptr {
-			d = reflect.ValueOf(d).Elem().Interface()
-		}
-
-		outStr += fmt.Sprintf("==> Data %d: ", i)
-		dd, err := fmtDebugData(d)
-		if err != nil {
-			err = errors.Wrapf(err, "Error while formatting DEBUG data at index: %d", i)
-			return "", err
-		}
-		outStr += dd + "\n"
-		outStr += "--------------\n"
-	}
-
-	outStr += "========================\n"
-	return outStr, nil
 }
