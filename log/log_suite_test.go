@@ -250,7 +250,7 @@ var _ = Describe("LogSink", func() {
 				err := json.Unmarshal(msg.Value, l)
 				Expect(err).ToNot(HaveOccurred())
 
-				switch l.Description {
+				switch strings.TrimSpace(l.Description) {
 				case uuid3.String():
 					dSuccess = false
 				case uuid2.String():
@@ -425,9 +425,12 @@ var _ = Describe("LogSink", func() {
 				EventAction: "testaction",
 				Result:      testDataBytes,
 			}
+			logger.I(Entry{
+				Description: "test==========",
+			})
 			logger.D(testLog, t1, t2, t3, t4, "testData5", 4)
 
-			desc, err := fmtDebug(testLog.Description, t1, t2, t3, t4, "testData5", 4)
+			desc, err := fmtDebug(testLog.Description, 15, t1, t2, t3, t4, "testData5", 4)
 			Expect(err).ToNot(HaveOccurred())
 			testLog.Description = desc
 
@@ -451,10 +454,10 @@ var _ = Describe("LogSink", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			consumer.Consume(ctx, handler)
-		}, 20)
+		}, 2000)
 	})
 
-	It("should use background-context when nil context is provided", func() {
+	It("should use a default context when nil context is provided", func() {
 		prodConfig := &kafka.ProducerConfig{
 			KafkaBrokers: kafkaBrokers,
 		}

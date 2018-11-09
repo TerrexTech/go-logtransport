@@ -89,6 +89,7 @@ func Init(
 	}()
 
 	return &logger{
+		arrThreshold: 15,
 		logChan:      (chan<- model.LogEntry)(logChan),
 		enableOutput: true,
 		output:       os.Stdout,
