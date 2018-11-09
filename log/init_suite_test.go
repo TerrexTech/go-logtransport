@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,10 +129,12 @@ var _ = Describe("LogSink", func() {
 				}
 			}()
 
+			uuid, err := uuuid.NewV4()
+			Expect(err).ToNot(HaveOccurred())
 			testLog := Entry{
-				Description:   "test-log",
+				Description:   "test-description",
 				ErrorCode:     0,
-				EventAction:   "test-eventaction",
+				EventAction:   uuid.String(),
 				ServiceAction: "test-svcaction",
 				ServiceName:   "testsvc",
 			}
@@ -145,7 +148,7 @@ var _ = Describe("LogSink", func() {
 				err := json.Unmarshal(msg.Value, l)
 				Expect(err).ToNot(HaveOccurred())
 
-				if *l == testLog {
+				if l.EventAction == testLog.EventAction {
 					log.Println("The response matches")
 					close(done)
 					return true
@@ -174,7 +177,6 @@ var _ = Describe("LogSink", func() {
 				ServiceAction: "test-svcaction",
 			}
 			logger.I(testLog)
-			testLog.ServiceName = "testsvc"
 
 			msgCallback := func(msg *sarama.ConsumerMessage) bool {
 				defer GinkgoRecover()
@@ -184,7 +186,7 @@ var _ = Describe("LogSink", func() {
 				err := json.Unmarshal(msg.Value, l)
 				Expect(err).ToNot(HaveOccurred())
 
-				if *l == testLog {
+				if l.ServiceName == "testsvc" {
 					log.Println("The response matches")
 					close(done)
 					return true
@@ -382,6 +384,7 @@ var _ = Describe("LogSink", func() {
 
 			err = os.Setenv(LogLevelEnvVar, "DEBUG")
 			Expect(err).ToNot(HaveOccurred())
+
 			testLog := Entry{
 				Description:   uuid.String(),
 				ErrorCode:     0,
@@ -389,9 +392,14 @@ var _ = Describe("LogSink", func() {
 				ServiceAction: "test-svcaction",
 				ServiceName:   "some-name",
 			}
+			testData := model.KafkaResponse{
+				AggregateID: 1,
+			}
+			testDataBytes, err := json.Marshal(testData)
+			Expect(err).ToNot(HaveOccurred())
 			t1 := &model.Event{
 				EventAction: "test-action",
-				Data:        []byte("some-data"),
+				Data:        testDataBytes,
 			}
 			t2 := &model.EventStoreQuery{
 				AggregateID:      1,
@@ -407,9 +415,15 @@ var _ = Describe("LogSink", func() {
 					AggregateVersion: 8,
 				},
 			}
+			testData = model.KafkaResponse{
+				AggregateID: 1,
+			}
+			testDataBytes, err = json.Marshal(testData)
+			Expect(err).ToNot(HaveOccurred())
 			t4 := model.KafkaResponse{
 				AggregateID: 1,
 				EventAction: "testaction",
+				Result:      testDataBytes,
 			}
 			logger.D(testLog, t1, t2, t3, t4, "testData5", 4)
 
@@ -425,7 +439,7 @@ var _ = Describe("LogSink", func() {
 				err := json.Unmarshal(msg.Value, &l)
 				Expect(err).ToNot(HaveOccurred())
 
-				if l == testLog {
+				if strings.Contains(l.Description, uuid.String()) {
 					log.Println("The response matches")
 					close(done)
 					return true
