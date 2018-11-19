@@ -11,7 +11,7 @@ import (
 
 	"github.com/TerrexTech/uuuid"
 
-	"github.com/TerrexTech/go-eventstore-models/model"
+	"github.com/TerrexTech/go-common-models/model"
 
 	"github.com/Shopify/sarama"
 	"github.com/TerrexTech/go-commonutils/commonutil"
@@ -132,11 +132,10 @@ var _ = Describe("LogSink", func() {
 			uuid, err := uuuid.NewV4()
 			Expect(err).ToNot(HaveOccurred())
 			testLog := Entry{
-				Description:   "test-description",
-				ErrorCode:     0,
-				EventAction:   uuid.String(),
-				ServiceAction: "test-svcaction",
-				ServiceName:   "testsvc",
+				Description: "test-description",
+				ErrorCode:   0,
+				Action:      uuid.String(),
+				ServiceName: "testsvc",
 			}
 			logger.I(testLog)
 
@@ -148,7 +147,7 @@ var _ = Describe("LogSink", func() {
 				err := json.Unmarshal(msg.Value, l)
 				Expect(err).ToNot(HaveOccurred())
 
-				if l.EventAction == testLog.EventAction {
+				if l.Action == testLog.Action {
 					log.Println("The response matches")
 					close(done)
 					return true
@@ -171,10 +170,9 @@ var _ = Describe("LogSink", func() {
 			}()
 
 			testLog := Entry{
-				Description:   "test-log",
-				ErrorCode:     0,
-				EventAction:   "test-eventaction",
-				ServiceAction: "test-svcaction",
+				Description: "test-log",
+				ErrorCode:   0,
+				Action:      "test-eventaction",
 			}
 			logger.I(testLog)
 
@@ -213,31 +211,28 @@ var _ = Describe("LogSink", func() {
 			uuid1, err := uuuid.NewV4()
 			Expect(err).ToNot(HaveOccurred())
 			logger.I(Entry{
-				Description:   uuid1.String(),
-				ErrorCode:     0,
-				EventAction:   uuid1.String(),
-				ServiceAction: "test-svcaction",
-				ServiceName:   "some-name",
+				Description: uuid1.String(),
+				ErrorCode:   0,
+				Action:      uuid1.String(),
+				ServiceName: "some-name",
 			})
 
 			uuid2, err := uuuid.NewV4()
 			Expect(err).ToNot(HaveOccurred())
 			logger.E(Entry{
-				Description:   uuid2.String(),
-				ErrorCode:     0,
-				EventAction:   uuid2.String(),
-				ServiceAction: "test-svcaction",
-				ServiceName:   "some-name",
+				Description: uuid2.String(),
+				ErrorCode:   0,
+				Action:      uuid2.String(),
+				ServiceName: "some-name",
 			})
 
 			uuid3, err := uuuid.NewV4()
 			Expect(err).ToNot(HaveOccurred())
 			logger.D(Entry{
-				Description:   uuid3.String(),
-				ErrorCode:     0,
-				EventAction:   uuid3.String(),
-				ServiceAction: "test-svcaction",
-				ServiceName:   "some-name",
+				Description: uuid3.String(),
+				ErrorCode:   0,
+				Action:      uuid3.String(),
+				ServiceName: "some-name",
 			})
 
 			dSuccess := true
@@ -287,21 +282,19 @@ var _ = Describe("LogSink", func() {
 			uuid1, err := uuuid.NewV4()
 			Expect(err).ToNot(HaveOccurred())
 			logger.I(Entry{
-				Description:   uuid1.String(),
-				ErrorCode:     0,
-				EventAction:   uuid1.String(),
-				ServiceAction: "test-svcaction",
-				ServiceName:   "some-name",
+				Description: uuid1.String(),
+				ErrorCode:   0,
+				Action:      uuid1.String(),
+				ServiceName: "some-name",
 			})
 
 			uuid2, err := uuuid.NewV4()
 			Expect(err).ToNot(HaveOccurred())
 			logger.D(Entry{
-				Description:   uuid2.String(),
-				ErrorCode:     0,
-				EventAction:   uuid2.String(),
-				ServiceAction: "test-svcaction",
-				ServiceName:   "some-name",
+				Description: uuid2.String(),
+				ErrorCode:   0,
+				Action:      uuid2.String(),
+				ServiceName: "some-name",
 			})
 
 			isMsgReceived := false
@@ -340,11 +333,10 @@ var _ = Describe("LogSink", func() {
 			err = os.Setenv(LogLevelEnvVar, "NONE")
 			Expect(err).ToNot(HaveOccurred())
 			testLog := Entry{
-				Description:   uuid.String(),
-				ErrorCode:     0,
-				EventAction:   uuid.String(),
-				ServiceAction: "test-svcaction",
-				ServiceName:   "some-name",
+				Description: uuid.String(),
+				ErrorCode:   0,
+				Action:      uuid.String(),
+				ServiceName: "some-name",
 			}
 			logger.I(testLog)
 
@@ -386,20 +378,19 @@ var _ = Describe("LogSink", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			testLog := Entry{
-				Description:   uuid.String(),
-				ErrorCode:     0,
-				EventAction:   uuid.String(),
-				ServiceAction: "test-svcaction",
-				ServiceName:   "some-name",
+				Description: uuid.String(),
+				ErrorCode:   0,
+				Action:      uuid.String(),
+				ServiceName: "some-name",
 			}
-			testData := model.KafkaResponse{
-				AggregateID: 1,
+			testData := model.Document{
+				UUID: uuid,
 			}
 			testDataBytes, err := json.Marshal(testData)
 			Expect(err).ToNot(HaveOccurred())
 			t1 := &model.Event{
-				EventAction: "test-action",
-				Data:        testDataBytes,
+				Action: "test-action",
+				Data:   testDataBytes,
 			}
 			t2 := &model.EventStoreQuery{
 				AggregateID:      1,
@@ -415,20 +406,48 @@ var _ = Describe("LogSink", func() {
 					AggregateVersion: 8,
 				},
 			}
-			testData = model.KafkaResponse{
-				AggregateID: 1,
+			testMapArr := []map[string]interface{}{
+				map[string]interface{}{
+					"test-key": "test-value",
+				},
 			}
-			testDataBytes, err = json.Marshal(testData)
+			testNestedData := model.Document{
+				// Logger, do you bleed?
+				// (Do not use any spaces, they are trimmed below for testing purposes)
+				Data: []byte(`
+					[
+						{"a": 1},
+						{"someKey": "testValue"},
+						[
+							{"testNested": "veryNested"},
+							[
+								{"moreNested": "suchNested"},
+								[
+									{"suchNested": "muchResolution"},
+									{
+										"suchResolution": {
+											"muchWow": "wow"
+										}
+									},
+									"damn",
+									[],
+									{}
+								]
+							]
+						]
+					]`),
+				Source: "test",
+			}
+			nestedDataBytes, err := json.Marshal(testNestedData)
 			Expect(err).ToNot(HaveOccurred())
-			t4 := model.KafkaResponse{
-				AggregateID: 1,
-				EventAction: "testaction",
-				Result:      testDataBytes,
+			t4 := model.Document{
+				Data:      nestedDataBytes,
+				Error:     "test-error",
+				ErrorCode: 1,
+				Source:    "test-source",
+				Topic:     "test-topic",
 			}
-			logger.I(Entry{
-				Description: "test==========",
-			})
-			logger.D(testLog, t1, t2, t3, t4, "testData5", 4)
+			logger.D(testLog, t1, t2, t3, t4, "testData5", 4, testMapArr)
 
 			desc, err := fmtDebug(testLog.Description, 15, t1, t2, t3, t4, "testData5", 4)
 			Expect(err).ToNot(HaveOccurred())
@@ -443,9 +462,15 @@ var _ = Describe("LogSink", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				if strings.Contains(l.Description, uuid.String()) {
-					log.Println("The response matches")
-					close(done)
-					return true
+					// Remove all types of spaces
+					trimmedDesc := strings.Replace(string(testNestedData.Data), " ", "", -1)
+					trimmedDesc = strings.Replace(trimmedDesc, "\n", "", -1)
+					trimmedDesc = strings.Replace(trimmedDesc, "\t", "", -1)
+					if strings.Contains(l.Description, trimmedDesc) {
+						log.Println("The response matches")
+						close(done)
+						return true
+					}
 				}
 				return false
 			}
@@ -454,7 +479,7 @@ var _ = Describe("LogSink", func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			consumer.Consume(ctx, handler)
-		}, 2000)
+		}, 20)
 	})
 
 	It("should use a default context when nil context is provided", func() {

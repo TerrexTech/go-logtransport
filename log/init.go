@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/TerrexTech/go-eventstore-models/model"
+	"github.com/TerrexTech/go-common-models/model"
 	"github.com/TerrexTech/go-kafkautils/kafka"
 	"github.com/pkg/errors"
 )
