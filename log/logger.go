@@ -100,7 +100,7 @@ func (l *logger) E(entry Entry, data ...interface{}) {
 		ErrorCode:   entry.ErrorCode,
 		Level:       "ERROR",
 		ServiceName: entry.ServiceName,
-	})
+	}, data...)
 }
 
 func (l *logger) F(entry Entry, data ...interface{}) {
@@ -110,7 +110,7 @@ func (l *logger) F(entry Entry, data ...interface{}) {
 		ErrorCode:   entry.ErrorCode,
 		Level:       "ERROR",
 		ServiceName: entry.ServiceName,
-	})
+	}, data...)
 	os.Exit(1)
 }
 
@@ -121,7 +121,7 @@ func (l *logger) I(entry Entry, data ...interface{}) {
 		ErrorCode:   entry.ErrorCode,
 		Level:       "INFO",
 		ServiceName: entry.ServiceName,
-	})
+	}, data...)
 }
 
 func (l *logger) log(entry model.LogEntry, data ...interface{}) {
