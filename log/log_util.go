@@ -8,16 +8,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TerrexTech/go-common-models/model"
 	"github.com/TerrexTech/go-commonutils/commonutil"
-	"github.com/TerrexTech/go-eventstore-models/model"
-	"github.com/pkg/errors"
 )
+
+// TODO: Refactor the formatting-code and improve tests.
 
 // fmtDebug adds the provided additional data to log-description if the level is DEBUG.
 func fmtDebug(
 	description string, arrThreshold int, data ...interface{},
 ) (string, error) {
-	// TODO: Refactor the formatting-code
 	_, file, line, ok := runtime.Caller(3)
 	if !ok {
 		file = "???"
@@ -48,11 +48,7 @@ func fmtDebug(
 		}
 
 		outStr += fmt.Sprintf("==> Data %d: ", i)
-		dd, err := fmtDebugData(d, arrThreshold)
-		if err != nil {
-			err = errors.Wrapf(err, "Error while formatting DEBUG data at index: %d", i)
-			return dd, err
-		}
+		dd := fmtDebugData(d, arrThreshold)
 		outStr += dd + "\n"
 	}
 	outStr += "--------------\n"
@@ -60,151 +56,148 @@ func fmtDebug(
 	return outStr, nil
 }
 
-// fmtDebugData attempts to create a human-readable formatted string from provided data.
-func fmtDebugData(d interface{}, arrThreshold int) (string, error) {
+// fmtDebugData performs left-fold on data and gets results from fmtKnownTypes.
+func fmtDebugData(d interface{}, arrThreshold int) string {
+	dataType := reflect.TypeOf(d)
+	if dataType.Kind() == reflect.Ptr {
+		d = reflect.ValueOf(d).Elem().Interface()
+	}
+
+	dataKind := reflect.ValueOf(d).Kind()
+	switch dataKind {
+	case reflect.Slice, reflect.Array:
+		outStr := fmt.Sprintf("%s:\n", dataType.String())
+
+		v := reflect.ValueOf(d)
+		arrLength := v.Len()
+
+		if arrThreshold > 0 && arrLength > arrThreshold {
+			outStr = fmt.Sprintf(
+				"Array (length: %d) exceeds array-length threshold of %d.\n",
+				arrLength,
+				arrThreshold,
+			)
+		}
+
+		if arrLength > arrThreshold {
+			arrLength = arrThreshold
+		}
+		for i := 0; i < arrLength; i++ {
+			outStr += "-----\n"
+			outStr += fmt.Sprintf("=> Index %d: ", i)
+
+			dd := fmtDebugData(v.Index(i).Interface(), arrThreshold)
+			outStr += dd + "\n"
+		}
+		outStr += "-----"
+		return outStr
+
+	default:
+		result := fmtKnownTypes(d, arrThreshold)
+		mr, err := json.Marshal(result)
+		if err != nil {
+			return fmt.Sprintf("%s:\n%+v", dataType.String(), d)
+		}
+		return fmt.Sprintf("%s:\n%s", dataType.String(), string(mr))
+	}
+}
+
+// fmtKnownTypes check if data-type is one of common-models,
+// and tries to parse nested Data if it is.
+func fmtKnownTypes(d interface{}, arrThreshold int) interface{} {
 	if reflect.TypeOf(d).Kind() == reflect.Ptr {
 		d = reflect.ValueOf(d).Elem().Interface()
 	}
 
 	switch t := d.(type) {
-	case model.Event:
+	case model.Command:
+		dd := fmtKnownTypes(parseESModels(t.Data, arrThreshold), arrThreshold)
 		tm := map[string]interface{}{
-			"aggregateID":   t.AggregateID,
-			"eventAction":   t.EventAction,
-			"serviceAction": t.ServiceAction,
-			"correlationID": t.CorrelationID,
-			"data":          parseESModels(t.Data),
-			"nanoTime":      t.NanoTime,
-			"userUUID":      t.UserUUID.String(),
-			"uuid":          t.UUID.String(),
-			"version":       t.Version,
-			"yearBucket":    t.YearBucket,
+			"action":        t.Action,
+			"correlationId": t.CorrelationID,
+			"data":          dd,
+			"responseTopic": t.ResponseTopic,
+			"source":        t.Source,
+			"sourceTopic":   t.SourceTopic,
+			"timestamp":     t.Timestamp,
+			"ttlSec":        t.TTLSec,
+			"uuid":          t.UUID,
 		}
-		mm, err := json.Marshal(tm)
-		if err != nil {
-			err = errors.Wrap(err, "Error marshalling Event")
-			return "", err
-		}
-		return fmt.Sprintf("%s:\n%s", reflect.TypeOf(t).String(), string(mm)), nil
+		return tm
 
-	case model.KafkaResponse:
+	case model.Document:
+		dd := fmtKnownTypes(parseESModels(t.Data, arrThreshold), arrThreshold)
 		tm := map[string]interface{}{
-			"aggregateID":   t.AggregateID,
+			"correlationId": t.CorrelationID,
+			"data":          dd,
 			"error":         t.Error,
 			"errorCode":     t.ErrorCode,
+			"source":        t.Source,
 			"topic":         t.Topic,
-			"eventAction":   t.EventAction,
-			"serviceAction": t.ServiceAction,
+			"uuid":          t.UUID,
+		}
+		return tm
+
+	case model.Event:
+		dd := fmtKnownTypes(parseESModels(t.Data, arrThreshold), arrThreshold)
+		tm := map[string]interface{}{
+			"action":        t.Action,
+			"aggregateID":   t.AggregateID,
 			"correlationID": t.CorrelationID,
-			"result":        parseESModels(t.Result),
-			"input":         parseESModels(t.Input),
-			"uuid":          t.UUID.String(),
+			"data":          dd,
+			"nanoTime":      t.NanoTime,
+			"source":        t.Source,
+			"userUUID":      t.UserUUID,
+			"uuid":          t.UUID,
+			"version":       t.Version,
+			"year":          t.YearBucket,
 		}
-		mm, err := json.Marshal(tm)
-		if err != nil {
-			err = errors.Wrap(err, "Error marshalling KafkaResponse")
-			return "", err
-		}
-		return fmt.Sprintf("%s:\n%s", reflect.TypeOf(t).String(), string(mm)), nil
-
-	case model.EventMeta:
-		mm, err := json.Marshal(t)
-		if err != nil {
-			err = errors.Wrap(err, "Error marshalling EventMeta")
-			return "", err
-		}
-		return "EventMeta:\n" + string(mm), nil
-
-	case model.EventStoreQuery:
-		mm, err := json.Marshal(t)
-		if err != nil {
-			err = errors.Wrap(err, "Error marshalling EventStoreQuery")
-			return "", err
-		}
-		return fmt.Sprintf("%s:\n%s", reflect.TypeOf(t).String(), string(mm)), nil
+		return tm
 
 	default:
-		dataKind := reflect.ValueOf(d).Kind()
-		switch dataKind {
-		case reflect.Struct, reflect.Map:
-			mm, err := json.Marshal(t)
-			if err != nil {
-				err = errors.Wrap(err, "Error marshalling Unknown Type")
-				return "", err
-			}
-			return fmt.Sprintf("%s:\n%s", reflect.TypeOf(t).String(), string(mm)), nil
-
-		case reflect.Slice, reflect.Array:
-			dataType := reflect.TypeOf(t).String()
-			outStr := fmt.Sprintf("%s:\n", dataType)
-
-			v := reflect.ValueOf(t)
-			arrLength := v.Len()
-
-			if arrThreshold > 0 && arrLength > arrThreshold {
-				outStr = fmt.Sprintf(
-					"Array (length: %d) exceeds array-length threshold of %d.\n",
-					arrLength,
-					arrThreshold,
-				)
-			}
-
-			if arrLength > arrThreshold {
-				arrLength = arrThreshold
-			}
-			for i := 0; i < arrLength; i++ {
-				outStr += "-----\n"
-				outStr += fmt.Sprintf("=> Index %d: ", i)
-
-				dd, err := fmtDebugData(v.Index(i).Interface(), arrThreshold)
-				if err != nil {
-					err = errors.Wrapf(err, `Error formatting %s at index: "%d"`, dataType, i)
-					outStr += dd
-				}
-				outStr += dd + "\n"
-			}
-			outStr += "-----"
-			return outStr, nil
-
-		default:
-			return fmt.Sprintf("%v", d), nil
-		}
+		return t
 	}
 }
 
-// parseESModels tries to parse provie json-bytes to an EventStore-Model.
-func parseESModels(jsonBytes []byte) interface{} {
+// parseESModels tries to parse provided json-bytes
+// to a Common-Model (from go-common-models package).
+func parseESModels(jsonBytes []byte, arrThreshold int) interface{} {
 	m := map[string]interface{}{}
 	err := json.Unmarshal(jsonBytes, &m)
 	if err != nil {
-		return string(jsonBytes)
+		arr := []interface{}{}
+		err = json.Unmarshal(jsonBytes, &arr)
+		if err != nil || len(arr) == 0 {
+			return string(jsonBytes)
+		}
+
+		results := []interface{}{}
+		for _, v := range arr {
+			dd := fmtKnownTypes(v, arrThreshold)
+			results = append(results, dd)
+		}
+		return results
 	}
 
-	em := &model.EventMeta{}
-	esQuery := &model.EventStoreQuery{}
-	kr := &model.KafkaResponse{}
+	doc := &model.Document{}
+	cmd := &model.Command{}
 	event := &model.Event{}
 
-	emTags := getTags(em)
-	esQueryTags := getTags(esQuery)
-	krTags := getTags(kr)
+	docTags := getTags(doc)
+	cmdTags := getTags(cmd)
 	eventTags := getTags(event)
 
-	isEM := true
-	isESQuery := true
-	isKR := true
+	isDoc := true
+	isCmd := true
 	isEvent := true
 
 	containsKey := commonutil.IsElementInSlice
 	for k := range m {
-		if isEM && !containsKey(emTags, k) {
-			isEM = false
+		if isDoc && !containsKey(docTags, k) {
+			isDoc = false
 		}
-		if isESQuery && !containsKey(esQueryTags, k) {
-			isESQuery = false
-		}
-		if isKR && !containsKey(krTags, k) {
-			isKR = false
+		if isCmd && !containsKey(cmdTags, k) {
+			isCmd = false
 		}
 		if isEvent && !containsKey(eventTags, k) {
 			isEvent = false
@@ -213,22 +206,16 @@ func parseESModels(jsonBytes []byte) interface{} {
 
 	// Start from smallest struct, and validate till largest
 	switch true {
-	case isEM:
-		err := json.Unmarshal(jsonBytes, em)
+	case isDoc:
+		err := json.Unmarshal(jsonBytes, doc)
 		if err == nil {
-			return em
+			return doc
 		}
 
-	case isESQuery:
-		err := json.Unmarshal(jsonBytes, esQuery)
+	case isCmd:
+		err := json.Unmarshal(jsonBytes, cmd)
 		if err == nil {
-			return esQuery
-		}
-
-	case isKR:
-		err := json.Unmarshal(jsonBytes, kr)
-		if err == nil {
-			return kr
+			return cmd
 		}
 
 	case isEvent:
@@ -238,7 +225,8 @@ func parseESModels(jsonBytes []byte) interface{} {
 		}
 	}
 
-	return string(jsonBytes)
+	fmtData := fmtKnownTypes(m, arrThreshold)
+	return fmtData
 }
 
 // getTags gets json-tag field-names from a struct
